@@ -1,0 +1,113 @@
+name: Build SchoolERP Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    name: Build debug APK with Capacitor and Android SDK
+    runs-on: ubuntu-latest
+    env:
+      # Choose the permanent app ID before the first build. Keep it unchanged for updates.
+      APP_ID: com.aichallengevideo.schoolerp
+      APP_NAME: SchoolERP
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Unpack the project ZIP currently stored in this repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          archives=(workspace-*.zip)
+          if [ "${#archives[@]}" -ne 1 ]; then
+            echo "Expected exactly one workspace-*.zip at repository root; found ${#archives[@]}."
+            exit 1
+          fi
+          mkdir -p source
+          unzip -q "${archives[0]}" -d source
+          test -f source/package.json
+          test -f source/package-lock.json
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+
+      - name: Set up Java for Android Gradle
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK tools
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK platform and build tools
+        run: |
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Install web app dependencies
+        working-directory: source
+        run: npm ci
+
+      - name: Add Capacitor Android wrapper
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$APP_ID" =~ ^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$ ]]; then
+            echo "APP_ID must be a dotted Android application ID, e.g. com.schoolname.schoolerp."
+            exit 1
+          fi
+          npm install --no-save --package-lock=false \
+            @capacitor/core@8.5.2 \
+            @capacitor/android@8.5.2 \
+            @capacitor/cli@8.5.2
+          cat > capacitor.config.ts <<EOF
+          import type { CapacitorConfig } from '@capacitor/cli';
+          const config: CapacitorConfig = {
+            appId: '${APP_ID}',
+            appName: '${APP_NAME}',
+            webDir: 'dist',
+          };
+          export default config;
+          EOF
+
+      - name: Run tests and build the web app
+        working-directory: source
+        run: |
+          npm run test
+          npm run build
+
+      - name: Generate Android project and copy web assets
+        working-directory: source
+        run: |
+          npx cap add android
+          npx cap sync android
+
+      - name: Build installable debug APK
+        working-directory: source/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: schoolerp-debug-apk
+          path: source/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
