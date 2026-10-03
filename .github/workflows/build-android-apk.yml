@@ -72,10 +72,10 @@ jobs:
             echo "APP_ID must be a dotted Android application ID, e.g. com.schoolname.schoolerp."
             exit 1
           fi
-          npm install --no-save --package-lock=false \
+          npm install --save-exact \
             @capacitor/core@8.5.2 \
-            @capacitor/android@8.5.2 \
-            @capacitor/cli@8.5.2
+            @capacitor/android@8.5.2
+          npm install --save-dev --save-exact @capacitor/cli@8.5.2
           cat > capacitor.config.ts <<EOF
           import type { CapacitorConfig } from '@capacitor/cli';
           const config: CapacitorConfig = {
